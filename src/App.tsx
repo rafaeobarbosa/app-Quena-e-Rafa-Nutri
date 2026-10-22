@@ -8,7 +8,7 @@ import { CakeWarfareApp } from './game/CakeWarfareApp';
 
 export function App() {
   const session = useSession();
-  const [view, setView] = useState<'game' | 'login' | 'register'>('game');
+  const [view, setView] = useState<'game' | 'login' | 'register'>('login');
 
   // Listen to cross-tab updates or manual state changes
   useEffect(() => {
