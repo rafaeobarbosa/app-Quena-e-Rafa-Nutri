@@ -14,7 +14,10 @@ import {
   Ruler,
   Scale,
   Percent,
-  CalendarCheck
+  CalendarCheck,
+  Eye,
+  RefreshCw,
+  Wand2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +25,7 @@ import { sql } from '@/lib/db';
 import { PesoChart } from './PesoChart';
 import { NovaConsultaModal } from './NovaConsultaModal';
 import { PacienteCompleto } from './PacientesView';
+import { PlanoAlimentarEditor, PlanoSemanalData } from './PlanoAlimentarEditor';
 
 interface PerfilPacienteViewProps {
   pacienteId: string;
@@ -115,6 +119,13 @@ export const PerfilPacienteView: React.FC<PerfilPacienteViewProps> = ({
 
   // Modal / Visualização de Plano Alimentar do Histórico
   const [planoVisualizado, setPlanoVisualizado] = useState<PlanoAlimentarItem | null>(null);
+
+  // Estados da Geração e Edição de Plano com IA (Prompt 6)
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [planGenerationStep, setPlanGenerationStep] = useState<string>('');
+  const [planToast, setPlanToast] = useState<{ message: string; type: 'error' | 'success' | 'warning' } | null>(null);
+  const [currentEditingPlan, setCurrentEditingPlan] = useState<PlanoSemanalData | null>(null);
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
 
   // Dados do paciente carregados do Neon
   const [paciente, setPaciente] = useState<PacienteCompleto | null>(null);
@@ -422,6 +433,161 @@ export const PerfilPacienteView: React.FC<PerfilPacienteViewProps> = ({
       setSaveError(err.message || 'Erro ao salvar alterações no banco.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Gerar Plano Alimentar com IA (Prompt 6)
+  const handleGerarPlanoComIA = async () => {
+    if (!paciente) return;
+    setIsGeneratingPlan(true);
+    setPlanToast(null);
+
+    // Mensagens dinâmicas de loading
+    setPlanGenerationStep('Buscando dados do paciente...');
+
+    const timer1 = setTimeout(() => {
+      setPlanGenerationStep('Analisando metas, restrições e alergias...');
+    }, 1200);
+
+    const timer2 = setTimeout(() => {
+      setPlanGenerationStep('IA calculando cardápio semanal personalizado...');
+    }, 2500);
+
+    const timer3 = setTimeout(() => {
+      setPlanGenerationStep('Estruturando opções de refeições...');
+    }, 4500);
+
+    try {
+      const dadosPacientePayload = {
+        nome: paciente.nome,
+        idade: idadeCalculada,
+        sexo: paciente.sexo,
+        peso_atual: pesoAtual || paciente.peso_inicial,
+        altura: alturaCm || paciente.altura,
+        objetivos: objetivosSelecionados.length > 0 ? objetivosSelecionados : paciente.objetivos,
+        objetivo_detalhado: objetivoTexto || paciente.objetivo_texto,
+        nivel_atividade: nivelAtividade || paciente.nivel_atividade,
+        patologias: patologiasSelecionadas.length > 0 ? patologiasSelecionadas : paciente.patologias,
+        restricoes_alimentares: restricoesSelecionadas.length > 0 ? restricoesSelecionadas : paciente.restricoes_alimentares,
+        alergias: alergiasSelecionadas.length > 0 ? alergiasSelecionadas : paciente.alergias,
+        medicamentos: medicamentos || paciente.medicamentos,
+        suplementos: suplementos || paciente.suplementos,
+        habitos: {
+          refeicoes_por_dia: refeicoesPorDia || paciente.refeicoes_por_dia,
+          horario_acorda: horarioAcorda || paciente.horario_acorda,
+          horario_dorme: horarioDorme || paciente.horario_dorme,
+          litros_agua: litrosAgua || paciente.litros_agua,
+          atividade_fisica: praticaAtividadeFisica || (paciente.atividade_fisica ? 'sim' : 'nao'),
+          atividade_fisica_descricao: atividadeFisicaDescricao || paciente.atividade_fisica_descricao,
+        },
+        observacoes: observacoes || paciente.observacoes,
+      };
+
+      // Chamada à serverless function /api/gerar-plano
+      const response = await fetch('/api/gerar-plano', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ dados_do_paciente: dadosPacientePayload }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Erro ${response.status} na chamada da API`);
+      }
+
+      const rawData = await response.text();
+      let planoGerado: PlanoSemanalData;
+
+      try {
+        planoGerado = JSON.parse(rawData);
+      } catch (parseErr) {
+        console.error('Falha ao fazer parse do JSON retornado pela IA:', parseErr);
+        throw new Error('A resposta da IA não é um JSON válido.');
+      }
+
+      if (!planoGerado?.plano_semanal || !Array.isArray(planoGerado.plano_semanal)) {
+        throw new Error('Estrutura de plano inválida retornada.');
+      }
+
+      setCurrentEditingPlan(planoGerado);
+      setPlanToast({
+        type: 'success',
+        message: 'Plano alimentar gerado com sucesso! Revise e ajuste as refeições abaixo.',
+      });
+    } catch (err: any) {
+      console.error('Erro na geração do plano alimentar:', err);
+      setPlanToast({
+        type: 'error',
+        message: 'Não foi possível gerar o plano com IA no momento. Deseja tentar novamente ou criar um Plano Manual?',
+      });
+    } finally {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+      setIsGeneratingPlan(false);
+      setPlanGenerationStep('');
+    }
+  };
+
+  // Criar Plano Manual direto (Fallback orientado)
+  const handleCriarPlanoManual = () => {
+    const dias = [
+      'Segunda-feira',
+      'Terça-feira',
+      'Quarta-feira',
+      'Quinta-feira',
+      'Sexta-feira',
+      'Sábado',
+      'Domingo'
+    ];
+    const planoVazio: PlanoSemanalData = {
+      plano_semanal: dias.map(dia => ({
+        dia,
+        refeicoes: {
+          cafe_da_manha: ['Opção 1', 'Opção 2', 'Opção 3', 'Opção 4', 'Opção 5'],
+          lanche_manha: ['Opção 1', 'Opção 2', 'Opção 3', 'Opção 4', 'Opção 5'],
+          almoco: ['Opção 1', 'Opção 2', 'Opção 3', 'Opção 4', 'Opção 5'],
+          lanche_tarde: ['Opção 1', 'Opção 2', 'Opção 3', 'Opção 4', 'Opção 5'],
+          jantar: ['Opção 1', 'Opção 2', 'Opção 3', 'Opção 4', 'Opção 5']
+        }
+      }))
+    };
+    setCurrentEditingPlan(planoVazio);
+    setPlanToast(null);
+  };
+
+  // Persistir Plano no Neon Database (tabela planos_alimentares)
+  const handleSalvarPlanoAlimentar = async (planoFinal: PlanoSemanalData) => {
+    setIsSavingPlan(true);
+    setPlanToast(null);
+    try {
+      await sql`
+        INSERT INTO public.planos_alimentares (paciente_id, conteudo)
+        VALUES (${pacienteId}::uuid, ${JSON.stringify(planoFinal)}::jsonb)
+      `;
+
+      // Atualiza o histórico de planos no estado
+      await loadPacienteData();
+
+      // Limpa a tela de edição e exibe toast de sucesso
+      setCurrentEditingPlan(null);
+      setPlanToast({
+        type: 'success',
+        message: 'Plano alimentar salvo com sucesso no banco de dados e adicionado ao histórico!',
+      });
+
+      setTimeout(() => {
+        setPlanToast(null);
+      }, 5000);
+    } catch (err: any) {
+      console.error('Erro ao persistir plano alimentar:', err);
+      setPlanToast({
+        type: 'error',
+        message: 'Erro ao salvar o plano alimentar no banco de dados. Tente novamente.',
+      });
+    } finally {
+      setIsSavingPlan(false);
     }
   };
 
@@ -1248,10 +1414,11 @@ export const PerfilPacienteView: React.FC<PerfilPacienteViewProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* SEÇÃO 3 — PLANOS ALIMENTARES                                              */}
+      {/* SEÇÃO 3 — PLANOS ALIMENTARES (PROMPT 6: IA + EDITOR + HISTÓRICO)          */}
       {/* ========================================================================= */}
       {activeMainSection === 'planos' && (
         <div className="space-y-6">
+          {/* Header da Seção de Planos com Botão de Ação */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-xl font-bold text-teal-950 flex items-center gap-2">
@@ -1259,35 +1426,143 @@ export const PerfilPacienteView: React.FC<PerfilPacienteViewProps> = ({
                 Planos Alimentares
               </h3>
               <p className="text-xs text-teal-700/80 mt-0.5">
-                Histórico de dietas e planos gerados para este paciente.
+                Gere cardápios semanais personalizados com IA ou consulte o histórico completo do paciente.
               </p>
             </div>
 
-            {/* Botão bem visível conforme Prompt 5 (funcionalidade completa no próximo prompt) */}
-            <Button
-              onClick={() => {
-                alert('A geração de planos com IA será implementada na próxima etapa!');
-              }}
-              className="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-bold flex items-center gap-2 shadow-lg shadow-teal-600/25 px-6 py-2.5 cursor-pointer self-start sm:self-auto"
-            >
-              <Sparkles className="w-4 h-4 text-emerald-200 animate-pulse" />
-              <span>Gerar Plano Alimentar</span>
-            </Button>
+            <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleCriarPlanoManual}
+                disabled={isGeneratingPlan || isSavingPlan}
+                className="border-teal-200 text-teal-800 hover:bg-teal-50 text-xs cursor-pointer"
+              >
+                <Plus className="w-4 h-4 mr-1.5 text-teal-600" />
+                Plano Manual
+              </Button>
+
+              {/* Botão em destaque conforme Prompt 6 */}
+              <Button
+                type="button"
+                onClick={handleGerarPlanoComIA}
+                disabled={isGeneratingPlan || isSavingPlan}
+                className="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-bold flex items-center gap-2 shadow-lg shadow-teal-600/25 px-5 py-2.5 text-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isGeneratingPlan ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-emerald-200" />
+                    <span>Gerando com IA...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-emerald-200 animate-pulse" />
+                    <span>✨ Gerar Plano com IA</span>
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
 
-          {/* Histórico de Planos */}
-          {planos.length === 0 ? (
-            <div className="bg-white rounded-3xl p-12 text-center border border-dashed border-teal-200">
-              <div className="w-14 h-14 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center mx-auto mb-3">
-                <FileText className="w-7 h-7" />
+          {/* Loading Visual com Mensagens Dinâmicas (Prompt 6) */}
+          {isGeneratingPlan && (
+            <div className="bg-gradient-to-r from-teal-50 to-emerald-50 rounded-3xl p-8 border border-teal-200 text-center shadow-xs animate-in fade-in">
+              <div className="w-12 h-12 rounded-2xl bg-teal-600 text-white flex items-center justify-center mx-auto mb-3 shadow-md shadow-teal-600/20 animate-pulse">
+                <Wand2 className="w-6 h-6 animate-bounce" />
               </div>
-              <h4 className="text-base font-bold text-teal-950">Nenhum plano alimentar gerado ainda</h4>
-              <p className="text-xs text-teal-600/70 mt-1 max-w-sm mx-auto">
-                Quando você gerar um plano alimentar para este paciente, ele aparecerá aqui com seu histórico completo.
+              <h4 className="text-base font-bold text-teal-950">A Inteligência Artificial está trabalhando</h4>
+              <p className="text-xs font-semibold text-teal-700 mt-1 flex items-center justify-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-teal-600 animate-ping"></span>
+                {planGenerationStep || 'Processando dados nutricionais...'}
+              </p>
+              <p className="text-[11px] text-teal-600/70 mt-2 max-w-md mx-auto">
+                Adaptando as 5 opções diárias de café da manhã, lanche, almoço e jantar às preferências e restrições de {paciente.nome}.
               </p>
             </div>
-          ) : (
-            <div className="space-y-4">
+          )}
+
+          {/* Alertas e Toasts Amigáveis */}
+          {planToast && (
+            <div className={`p-4 rounded-2xl border text-xs font-medium flex items-start justify-between gap-3 animate-in fade-in ${
+              planToast.type === 'error'
+                ? 'bg-rose-50 border-rose-200 text-rose-800'
+                : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            }`}>
+              <div className="flex items-start gap-2.5">
+                {planToast.type === 'error' ? (
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <p>{planToast.message}</p>
+                  {planToast.type === 'error' && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={handleGerarPlanoComIA}
+                        className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[11px] cursor-pointer"
+                      >
+                        Tentar Novamente
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCriarPlanoManual}
+                        className="px-2.5 py-1 bg-white hover:bg-rose-100/70 text-rose-800 font-bold border border-rose-300 rounded-lg text-[11px] cursor-pointer"
+                      >
+                        Criar Plano Manual
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setPlanToast(null)}
+                className="text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* INTERFACE DE EDIÇÃO INTERATIVA DO PLANO GERADO (PROMPT 6) */}
+          {currentEditingPlan && (
+            <PlanoAlimentarEditor
+              plano={currentEditingPlan}
+              isSaving={isSavingPlan}
+              onSave={handleSalvarPlanoAlimentar}
+              onCancel={() => setCurrentEditingPlan(null)}
+            />
+          )}
+
+          {/* Histórico de Planos Salvos */}
+          <div className="space-y-3 pt-2">
+            <h4 className="text-sm font-black text-teal-950 uppercase tracking-wider flex items-center gap-2">
+              <Clock className="w-4 h-4 text-teal-600" />
+              Histórico de Planos Salvos ({planos.length})
+            </h4>
+
+            {planos.length === 0 ? (
+              <div className="bg-white rounded-3xl p-12 text-center border border-dashed border-teal-200">
+                <div className="w-14 h-14 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center mx-auto mb-3">
+                  <FileText className="w-7 h-7" />
+                </div>
+                <h4 className="text-base font-bold text-teal-950">Nenhum plano alimentar gerado ainda</h4>
+                <p className="text-xs text-teal-600/70 mt-1 max-w-sm mx-auto mb-4">
+                  Clique no botão "✨ Gerar Plano com IA" para criar automaticamente um plano personalizado para este paciente.
+                </p>
+                <Button
+                  onClick={handleGerarPlanoComIA}
+                  disabled={isGeneratingPlan}
+                  className="bg-teal-600 hover:bg-teal-700 text-white text-xs cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                  Gerar Primeiro Plano
+                </Button>
+              </div>
+            ) : (
               <div className="bg-white rounded-3xl border border-teal-100 shadow-xs divide-y divide-teal-50 overflow-hidden">
                 {planos.map((plano) => (
                   <div
@@ -1309,19 +1584,41 @@ export const PerfilPacienteView: React.FC<PerfilPacienteViewProps> = ({
                       </div>
                     </div>
 
-                    <span className="text-xs font-semibold text-teal-700 bg-teal-50 group-hover:bg-teal-100/80 px-3 py-1.5 rounded-full border border-teal-100/80 transition-colors">
-                      Ver conteúdo completo →
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          let parsedContent = plano.conteudo;
+                          if (typeof parsedContent === 'string') {
+                            try {
+                              parsedContent = JSON.parse(parsedContent);
+                            } catch {}
+                          }
+                          if (parsedContent?.plano_semanal) {
+                            setCurrentEditingPlan(parsedContent);
+                          }
+                        }}
+                        className="text-xs font-semibold text-teal-800 bg-white hover:bg-teal-50 px-3 py-1.5 rounded-xl border border-teal-200 transition-colors cursor-pointer"
+                      >
+                        Carregar no Editor
+                      </button>
+
+                      <span className="text-xs font-semibold text-teal-700 bg-teal-50 group-hover:bg-teal-100/80 px-3 py-1.5 rounded-full border border-teal-100/80 transition-colors flex items-center gap-1">
+                        <Eye className="w-3.5 h-3.5" />
+                        Ver detalhes →
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {/* Modal de visualização do conteúdo completo do plano */}
+          {/* Modal de visualização do conteúdo completo do plano com layout bonito */}
           {planoVisualizado && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-teal-950/40 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-white rounded-3xl border border-teal-100 shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+              <div className="bg-white rounded-3xl border border-teal-100 shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
                 <div className="p-6 bg-gradient-to-r from-teal-700 to-emerald-600 text-white flex items-center justify-between">
                   <div>
                     <h3 className="font-bold text-lg">Conteúdo do Plano Alimentar</h3>
@@ -1337,12 +1634,60 @@ export const PerfilPacienteView: React.FC<PerfilPacienteViewProps> = ({
                   </button>
                 </div>
 
-                <div className="p-6 overflow-y-auto space-y-4">
-                  <pre className="p-4 rounded-2xl bg-teal-50/50 text-xs text-teal-950 font-mono overflow-x-auto whitespace-pre-wrap border border-teal-100">
-                    {typeof planoVisualizado.conteudo === 'object'
-                      ? JSON.stringify(planoVisualizado.conteudo, null, 2)
-                      : String(planoVisualizado.conteudo)}
-                  </pre>
+                <div className="p-6 overflow-y-auto space-y-6">
+                  {(() => {
+                    let conteudo = planoVisualizado.conteudo;
+                    if (typeof conteudo === 'string') {
+                      try {
+                        conteudo = JSON.parse(conteudo);
+                      } catch {}
+                    }
+
+                    if (conteudo?.plano_semanal && Array.isArray(conteudo.plano_semanal)) {
+                      return (
+                        <div className="space-y-6">
+                          {conteudo.plano_semanal.map((diaItem: any, idx: number) => (
+                            <div key={idx} className="p-5 rounded-2xl bg-teal-50/30 border border-teal-100 space-y-4">
+                              <h4 className="font-extrabold text-sm text-teal-950 flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-teal-600"></span>
+                                {diaItem.dia}
+                              </h4>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                                {Object.entries(diaItem.refeicoes || {}).map(([refKey, itens]: [string, any]) => {
+                                  const labelMap: Record<string, string> = {
+                                    cafe_da_manha: 'Café da Manhã',
+                                    lanche_manha: 'Lanche da Manhã',
+                                    almoco: 'Almoço',
+                                    lanche_tarde: 'Lanche da Tarde',
+                                    jantar: 'Jantar',
+                                  };
+                                  return (
+                                    <div key={refKey} className="bg-white p-3.5 rounded-xl border border-teal-100/80 shadow-2xs">
+                                      <h5 className="font-bold text-teal-900 mb-2">{labelMap[refKey] || refKey}:</h5>
+                                      <ul className="list-disc list-inside space-y-1 text-slate-700">
+                                        {Array.isArray(itens) ? itens.map((item, i) => (
+                                          <li key={i}>{String(item)}</li>
+                                        )) : <li>{String(itens)}</li>}
+                                      </ul>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <pre className="p-4 rounded-2xl bg-teal-50/50 text-xs text-teal-950 font-mono overflow-x-auto whitespace-pre-wrap border border-teal-100">
+                        {typeof planoVisualizado.conteudo === 'object'
+                          ? JSON.stringify(planoVisualizado.conteudo, null, 2)
+                          : String(planoVisualizado.conteudo)}
+                      </pre>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
