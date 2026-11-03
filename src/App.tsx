@@ -3,12 +3,11 @@ import { auth, useSession } from '@/lib/auth';
 import { LoginForm } from '@/components/auth/LoginForm';
 import { RegisterForm } from '@/components/auth/RegisterForm';
 import { Dashboard } from '@/components/dashboard/Dashboard';
-import { Leaf, Gamepad2 } from 'lucide-react';
-import { CakeWarfareApp } from './game/CakeWarfareApp';
+import { Leaf } from 'lucide-react';
 
 export function App() {
   const session = useSession();
-  const [view, setView] = useState<'game' | 'login' | 'register'>('login');
+  const [view, setView] = useState<'login' | 'register'>('login');
 
   // Listen to cross-tab updates or manual state changes
   useEffect(() => {
@@ -36,23 +35,6 @@ export function App() {
     );
   }
 
-  if (view === 'game') {
-    return (
-      <div className="relative w-screen h-screen">
-        <div className="absolute top-4 left-4 z-50">
-          <button
-            onClick={() => setView('login')}
-            className="flex items-center gap-2 px-4 py-2 bg-white/90 hover:bg-white text-slate-800 rounded-full font-bold shadow-lg border border-slate-200 text-xs backdrop-blur-md transition-all hover:scale-105 active:scale-95"
-          >
-            <Leaf className="w-4 h-4 text-teal-600" />
-            Nutri Help (Painel)
-          </button>
-        </div>
-        <CakeWarfareApp />
-      </div>
-    );
-  }
-
   // Regra do prompt 2:
   // - Após o login bem sucedido, redirecionar para o dashboard
   // - Manter a sessão ativa para que ele(a) não precise fazer login toda vez que abrir o sistema
@@ -69,15 +51,6 @@ export function App() {
   // Auth screen (Login / Register)
   return (
     <div className="min-h-screen bg-[#f3faf9] flex flex-col justify-center items-center py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
-      <div className="absolute top-4 right-4 z-50">
-        <button
-          onClick={() => setView('game')}
-          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-pink-500 to-rose-500 text-white rounded-full font-bold shadow-lg text-xs transition-all hover:scale-105 active:scale-95"
-        >
-          <Gamepad2 className="w-4 h-4" />
-          Jogar Cake Warfare 3D
-        </button>
-      </div>
       {/* Background aesthetic decorative shapes */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-96 bg-gradient-to-b from-teal-100/50 via-teal-50/20 to-transparent pointer-events-none -z-10 rounded-b-full blur-2xl" />
       <div className="absolute -top-24 -right-24 w-96 h-96 bg-teal-200/30 rounded-full blur-3xl pointer-events-none -z-10" />
