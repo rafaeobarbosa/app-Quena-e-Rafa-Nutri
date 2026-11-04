@@ -146,17 +146,14 @@ export async function processarGeracaoPlano(dadosPaciente: any, apiKey?: string)
     required: ["plano_semanal"]
   };
 
-  // Instanciação do modelo gemini-2.5-flash / gemini-1.5-flash com structured output
-  // Suporta modelos como gemini-2.5-flash, gemini-1.5-flash ou outros disponíveis na API
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
-    generationConfig: {
-      responseMimeType: "application/json",
-      // @ts-ignore
-      responseSchema: schema,
-      temperature: 0.7,
-    }
-  });
+  // Lista de modelos ordenados por prioridade (conforme prompt6: gemini-3.8-flash ou superior/mais recente)
+  const modelosCandidatos = [
+    'gemini-3.8-flash',
+    'gemini-3.7-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-flash-latest'
+  ];
 
   const promptTexto = `Você é um nutricionista clínico profissional especialista na culinária e rotina brasileira.
 Gere um plano alimentar semanal completo, saudável e diversificado com base nos dados do paciente fornecidos abaixo.
@@ -187,33 +184,50 @@ O formato do JSON retornado deve seguir exatamente esta estrutura:
   ]
 }`;
 
-  try {
-    const result = await model.generateContent(promptTexto);
-    const response = await result.response;
-    const rawText = response.text();
+  let ultimoErro: any = null;
 
-    if (!rawText) {
-      throw new Error('Resposta vazia recebida do Gemini.');
+  for (const modeloNome of modelosCandidatos) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modeloNome,
+        generationConfig: {
+          responseMimeType: "application/json",
+          // @ts-ignore
+          responseSchema: schema,
+          temperature: 0.7,
+        }
+      });
+
+      const result = await model.generateContent(promptTexto);
+      const response = await result.response;
+      const rawText = response.text();
+
+      if (!rawText) {
+        throw new Error(`Resposta vazia recebida do modelo ${modeloNome}.`);
+      }
+
+      // Limpeza de possíveis blocos markdown residuais
+      const sanitizedText = rawText
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/```$/i, '')
+        .trim();
+
+      const parsed = JSON.parse(sanitizedText) as PlanoSemanalResponse;
+
+      if (!parsed?.plano_semanal || !Array.isArray(parsed.plano_semanal)) {
+        throw new Error('Formato retornado pela IA não contém a chave "plano_semanal".');
+      }
+
+      return parsed;
+    } catch (err: any) {
+      ultimoErro = err;
+      console.warn(`[gerar-plano] Modelo ${modeloNome} indisponível ou erro (${err.message}). Tentando próximo modelo...`);
     }
-
-    // Limpeza de possíveis blocos markdown residuais
-    const sanitizedText = rawText
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/```$/i, '')
-      .trim();
-
-    const parsed = JSON.parse(sanitizedText) as PlanoSemanalResponse;
-
-    if (!parsed?.plano_semanal || !Array.isArray(parsed.plano_semanal)) {
-      throw new Error('Formato retornado pela IA não contém a chave "plano_semanal".');
-    }
-
-    return parsed;
-  } catch (err: any) {
-    console.error('[gerar-plano] Falha na chamada da API Gemini:', err);
-    throw err;
   }
+
+  console.error('[gerar-plano] Todos os modelos Gemini falharam:', ultimoErro);
+  throw ultimoErro;
 }
 
 // Serverless Handler compatível com Vercel / Node.js

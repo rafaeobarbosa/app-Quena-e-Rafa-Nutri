@@ -1,4 +1,4 @@
-Você é um desenvolvedor full-stack sênior especializado em React, Neon e integração de LLMs. Sua tarefa é implementar a funcionalidade completa de geração automatizada de planos alimentares via IA dentro do sistema "Nutri SBM".
+Você é um desenvolvedor full-stack sênior especializado em React, Neon e integração de LLMs. Sua tarefa é implementar a funcionalidade completa de geração automatizada de planos alimentares via IA dentro do sistema "Quena e Rafa Nutri"
 
 #  STACK
 - React (Vite)
